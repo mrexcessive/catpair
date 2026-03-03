@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CatPair — Mahjong Matching Game</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #2c1e12;
+  color: #f5e6d3;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow-x: hidden;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1 {
+  font-size: 1.6rem;
+  margin: 12px 0 4px;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  letter-spacing: 0.04em;
+}
+
+#score-bar {
+  font-size: 0.95rem;
+  margin-bottom: 10px;
+  opacity: 0.85;
+}
+
+/* Loading indicator */
+#loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px;
+}
+#loading .spinner {
+  width: 48px; height: 48px;
+  border: 4px solid rgba(245,230,211,0.2);
+  border-top-color: #f5e6d3;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Board */
+#board {
+  display: grid;
+  grid-template-columns: repeat(10, 128px);
+  gap: 4px;
+  padding: 8px;
+}
+
+.tile {
+  width: 128px;
+  height: 128px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.4s ease;
+  border-radius: 8px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tile img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  border-radius: 8px;
+}
+.tile:hover { transform: scale(1.04); }
+.tile.selected {
+  transform: scale(1.08);
+  box-shadow: 0 0 14px 4px rgba(255, 200, 50, 0.8),
+              0 0 30px 8px rgba(255, 160, 20, 0.4);
+  z-index: 10;
+}
+.tile.matched {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.8);
+}
+.tile.hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Win overlay */
+#win-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(44, 30, 18, 0.92);
+  z-index: 200;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+}
+#win-overlay.show { display: flex; }
+#win-overlay h2 {
+  font-size: 2.4rem;
+  text-shadow: 0 0 20px rgba(255,200,50,0.6);
+}
+#win-overlay p { font-size: 1.1rem; opacity: 0.8; }
+#play-again {
+  padding: 14px 36px;
+  font-size: 1.1rem;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #d4a44a, #b8832e);
+  color: #2c1e12;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+#play-again:hover { transform: scale(1.06); }
+
+/* Particle canvas */
+#particles {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  h1 { font-size: 1.2rem; margin: 8px 0 2px; }
+  #score-bar { font-size: 0.8rem; margin-bottom: 6px; }
+  #board {
+    grid-template-columns: repeat(10, 64px);
+    gap: 2px;
+    padding: 4px;
+  }
+  .tile { width: 64px; height: 64px; }
+}
+</style>
+</head>
+<body>
+
+<h1>CatPair</h1>
+<div id="score-bar">Matches: <span id="match-count">0</span> / 50</div>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div>Loading cat tiles&hellip;</div>
+</div>
+
+<div id="board"></div>
+
+<canvas id="particles"></canvas>
+
+<div id="win-overlay">
+  <h2>You Win!</h2>
+  <p>All cats matched in <span id="final-moves">0</span> moves</p>
+  <button id="play-again">Play Again</button>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ── State ──
+  let tileNames = [];       // 25 unique tile filenames used this game
+  let grid = [];             // 100 entries: { name, el, matched }
+  let selected = null;       // index of first selected tile, or null
+  let isProcessing = false;
+  let matchCount = 0;
+  let moves = 0;
+  let audioCtx = null;
+  const isMobile = window.innerWidth <= 768;
+
+  // ── DOM refs ──
+  const boardEl = document.getElementById('board');
+  const loadingEl = document.getElementById('loading');
+  const matchCountEl = document.getElementById('match-count');
+  const winOverlay = document.getElementById('win-overlay');
+  const finalMovesEl = document.getElementById('final-moves');
+  const playAgainBtn = document.getElementById('play-again');
+
+  // ── Particle canvas ──
+  const canvas = document.getElementById('particles');
+  const ctx = canvas.getContext('2d');
+  let particles = [];
+  let animating = false;
+
+  function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  // ── Audio ──
+  function ensureAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  // 10 meow parameter variations
+  const meowParams = [
+    { f0: 520, f1: 780, dur: 0.35, vib: 8 },
+    { f0: 480, f1: 850, dur: 0.40, vib: 6 },
+    { f0: 600, f1: 900, dur: 0.30, vib: 10 },
+    { f0: 440, f1: 720, dur: 0.38, vib: 7 },
+    { f0: 560, f1: 800, dur: 0.32, vib: 9 },
+    { f0: 500, f1: 860, dur: 0.42, vib: 5 },
+    { f0: 620, f1: 880, dur: 0.28, vib: 11 },
+    { f0: 460, f1: 750, dur: 0.36, vib: 8 },
+    { f0: 540, f1: 820, dur: 0.34, vib: 7 },
+    { f0: 580, f1: 870, dur: 0.38, vib: 6 },
+  ];
+
+  function playMeow() {
+    ensureAudio();
+    const p = meowParams[Math.floor(Math.random() * meowParams.length)];
+    const t = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const vibOsc = audioCtx.createOscillator();
+    const vibGain = audioCtx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(p.f0, t);
+    osc.frequency.linearRampToValueAtTime(p.f1, t + p.dur * 0.3);
+    osc.frequency.linearRampToValueAtTime(p.f0 * 0.9, t + p.dur);
+
+    vibOsc.type = 'sine';
+    vibOsc.frequency.value = p.vib;
+    vibGain.gain.value = 15;
+    vibOsc.connect(vibGain);
+    vibGain.connect(osc.frequency);
+
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.25, t + 0.03);
+    gain.gain.setValueAtTime(0.25, t + p.dur * 0.5);
+    gain.gain.linearRampToValueAtTime(0, t + p.dur);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start(t);
+    vibOsc.start(t);
+    osc.stop(t + p.dur + 0.05);
+    vibOsc.stop(t + p.dur + 0.05);
+  }
+
+  function playWahWah() {
+    ensureAudio();
+    const t = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(440, t);
+    osc.frequency.setValueAtTime(440, t + 0.15);
+    osc.frequency.linearRampToValueAtTime(360, t + 0.3);
+    osc.frequency.linearRampToValueAtTime(280, t + 0.5);
+
+    // Tremolo
+    const trem = audioCtx.createOscillator();
+    const tremGain = audioCtx.createGain();
+    trem.type = 'sine';
+    trem.frequency.value = 8;
+    tremGain.gain.value = 0.08;
+    trem.connect(tremGain);
+    tremGain.connect(gain.gain);
+
+    gain.gain.setValueAtTime(0.15, t);
+    gain.gain.linearRampToValueAtTime(0, t + 0.55);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t);
+    trem.start(t);
+    osc.stop(t + 0.6);
+    trem.stop(t + 0.6);
+  }
+
+  function playHiss() {
+    ensureAudio();
+    const t = audioCtx.currentTime;
+    const bufferSize = audioCtx.sampleRate * 0.36;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+
+    const bp = audioCtx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 4000;
+    bp.Q.value = 1.5;
+
+    const hp = audioCtx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 2000;
+
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0.2, t);
+    gain.gain.linearRampToValueAtTime(0, t + 0.36);
+
+    src.connect(bp);
+    bp.connect(hp);
+    hp.connect(gain);
+    gain.connect(audioCtx.destination);
+    src.start(t);
+  }
+
+  // ── Particles ──
+  const starColors = ['#FFD700', '#FFA500', '#FF8C00', '#FFE066', '#FFC04D'];
+
+  function spawnBurst(x, y) {
+    for (let i = 0; i < 15; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 80 + Math.random() * 160;
+      particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 60,
+        size: 3 + Math.random() * 5,
+        color: starColors[Math.floor(Math.random() * starColors.length)],
+        life: 1,
+        decay: 0.015 + Math.random() * 0.02,
+        spin: Math.random() * Math.PI * 2,
+        spinRate: (Math.random() - 0.5) * 8,
+      });
+    }
+    if (!animating) {
+      animating = true;
+      requestAnimationFrame(animateParticles);
+    }
+  }
+
+  function drawStar(cx, cy, r, rotation, color, alpha) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.translate(cx, cy);
+    ctx.rotate(rotation);
+    ctx.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const a = (i * 4 * Math.PI) / 5 - Math.PI / 2;
+      const method = i === 0 ? 'moveTo' : 'lineTo';
+      ctx[method](Math.cos(a) * r, Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  let lastTime = 0;
+  function animateParticles(timestamp) {
+    const dt = lastTime ? Math.min((timestamp - lastTime) / 1000, 0.05) : 0.016;
+    lastTime = timestamp;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 300 * dt; // gravity
+      p.spin += p.spinRate * dt;
+      p.life -= p.decay;
+
+      if (p.life <= 0) {
+        particles.splice(i, 1);
+        continue;
+      }
+
+      drawStar(p.x, p.y, p.size, p.spin, p.color, p.life);
+    }
+
+    if (particles.length > 0) {
+      requestAnimationFrame(animateParticles);
+    } else {
+      animating = false;
+      lastTime = 0;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  // ── Fisher-Yates shuffle ──
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  // ── Get center of tile in viewport coords ──
+  function tileCenterViewport(el) {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+
+  // ── Board setup ──
+  function buildBoard(allTileNames) {
+    // Pick 25 unique tiles
+    const shuffled = shuffle([...allTileNames]);
+    const chosen = shuffled.slice(0, 25);
+    tileNames = chosen;
+
+    // Each tile repeated 4 times = 100
+    let deck = [];
+    for (const name of chosen) {
+      for (let i = 0; i < 4; i++) deck.push(name);
+    }
+    shuffle(deck);
+
+    // Preload images
+    const tileDir = isMobile ? 'assets/playtiles/64/' : 'assets/playtiles/';
+    const preloaded = new Map();
+    let loaded = 0;
+    const total = chosen.length;
+
+    return new Promise((resolve) => {
+      for (const name of chosen) {
+        const img = new Image();
+        img.onload = img.onerror = () => {
+          loaded++;
+          if (loaded >= total) resolve();
+        };
+        img.src = tileDir + name;
+        preloaded.set(name, img.src);
+      }
+    }).then(() => {
+      loadingEl.style.display = 'none';
+      boardEl.innerHTML = '';
+      grid = [];
+      selected = null;
+      isProcessing = false;
+      matchCount = 0;
+      moves = 0;
+      matchCountEl.textContent = '0';
+
+      for (let i = 0; i < 100; i++) {
+        const name = deck[i];
+        const div = document.createElement('div');
+        div.className = 'tile';
+        div.dataset.index = i;
+
+        const img = document.createElement('img');
+        img.src = preloaded.get(name);
+        img.alt = 'cat tile';
+        img.draggable = false;
+        div.appendChild(img);
+
+        div.addEventListener('click', () => onTileClick(i));
+
+        boardEl.appendChild(div);
+        grid.push({ name, el: div, matched: false });
+      }
+    });
+  }
+
+  // ── Click handler ──
+  function onTileClick(index) {
+    if (isProcessing) return;
+    const tile = grid[index];
+    if (tile.matched) return;
+
+    // First selection
+    if (selected === null) {
+      selected = index;
+      tile.el.classList.add('selected');
+      return;
+    }
+
+    // Clicked same tile
+    if (selected === index) {
+      tile.el.classList.remove('selected');
+      selected = null;
+      return;
+    }
+
+    // Second selection
+    const first = grid[selected];
+    const secondIndex = index;
+    const second = tile;
+    second.el.classList.add('selected');
+    moves++;
+
+    isProcessing = true;
+
+    if (first.name === second.name) {
+      // Match!
+      playMeow();
+
+      const c1 = tileCenterViewport(first.el);
+      const c2 = tileCenterViewport(second.el);
+      spawnBurst(c1.x, c1.y);
+      spawnBurst(c2.x, c2.y);
+
+      setTimeout(() => {
+        first.el.classList.remove('selected');
+        second.el.classList.remove('selected');
+        first.el.classList.add('matched');
+        second.el.classList.add('matched');
+        first.matched = true;
+        second.matched = true;
+
+        // Find all tiles with same name and check if all 4 are matched
+        // (we match in pairs, so 2 matched at a time out of 4)
+        matchCount++;
+        matchCountEl.textContent = matchCount;
+
+        if (matchCount >= 50) {
+          setTimeout(() => showWin(), 500);
+        }
+
+        selected = null;
+        isProcessing = false;
+      }, 400);
+    } else {
+      // Mismatch
+      playWahWah();
+      setTimeout(() => playHiss(), 150);
+
+      setTimeout(() => {
+        first.el.classList.remove('selected');
+        second.el.classList.remove('selected');
+        selected = null;
+        isProcessing = false;
+      }, 600);
+    }
+  }
+
+  // ── Win screen ──
+  function showWin() {
+    finalMovesEl.textContent = moves;
+    winOverlay.classList.add('show');
+  }
+
+  playAgainBtn.addEventListener('click', () => {
+    winOverlay.classList.remove('show');
+    loadingEl.style.display = 'flex';
+    startGame();
+  });
+
+  // ── Init ──
+  function startGame() {
+    fetch('assets/playtiles/tilelist.json')
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to load tilelist.json');
+        return r.json();
+      })
+      .then(names => {
+        if (names.length < 25) {
+          throw new Error(`Need at least 25 tiles, found ${names.length}`);
+        }
+        return buildBoard(names);
+      })
+      .catch(err => {
+        loadingEl.innerHTML = `<div style="color:#e66;">Error: ${err.message}</div>`;
+        console.error(err);
+      });
+  }
+
+  startGame();
+})();
+</script>
+</body>
+</html>
