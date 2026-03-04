@@ -161,6 +161,7 @@ h1 {
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.4s ease;
   border-radius: calc(var(--tile-size) * 0.0625);
+  border: calc(var(--tile-size) * 0.035) solid var(--tile-tint, rgba(212,164,74,0.5));
   user-select: none;
   -webkit-user-select: none;
 }
@@ -526,6 +527,16 @@ h1 {
   }
 
   // ── Particles ──
+  const tileTints = [
+    'rgba(230,190,60,0.55)',   // yellow
+    'rgba(220,140,40,0.55)',   // orange
+    'rgba(70,130,220,0.55)',   // blue
+    'rgba(80,180,80,0.55)',    // green
+    'rgba(60,190,200,0.55)',   // cyan
+    'rgba(210,70,70,0.55)',    // red
+    'rgba(160,90,200,0.55)',   // purple
+  ];
+
   const starColors = ['#FFD700', '#FFA500', '#FF8C00', '#FFE066', '#FFC04D'];
 
   function spawnBurst(x, y) {
@@ -867,6 +878,7 @@ h1 {
 
         const div = document.createElement('div');
         div.className = 'tile';
+        div.style.setProperty('--tile-tint', tileTints[Math.floor(Math.random() * tileTints.length)]);
 
         // Position
         div.style.left = (pos.hx * halfTile + pos.z * depthShift) + 'px';
