@@ -161,7 +161,6 @@ h1 {
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.4s ease;
   border-radius: calc(var(--tile-size) * 0.0625);
-  border: calc(var(--tile-size) * 0.035) solid var(--tile-tint, #d4a44a);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -171,6 +170,15 @@ h1 {
   display: block;
   pointer-events: none;
   border-radius: calc(var(--tile-size) * 0.0625);
+}
+.tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 calc(var(--tile-size) * 0.045) var(--tile-tint, #d4a44a);
+  mix-blend-mode: overlay;
+  pointer-events: none;
 }
 .tile:hover { transform: scale(1.04); }
 .tile.selected {
@@ -317,8 +325,8 @@ h1 {
   let moves = 0;
   let audioCtx = null;
   let currentTileSize = 64;
-  let holdTile = null;
   let holdStart = 0;
+  let holdDuration = 0;
   let clearedLayers = new Set();
 
   // ── DOM refs ──
@@ -413,39 +421,40 @@ h1 {
   resizeCanvas();
 
   // ── Audio ──
-  let audioUnlocked = false;
-
+  // iOS Safari requires AudioContext to be created AND resumed during a user
+  // gesture. We aggressively try on every gesture event and play a silent
+  // buffer each time to guarantee the context is truly unlocked.
   function ensureAudio() {
-    if (!audioCtx) {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    // iOS 17+ can get stuck in 'suspended' or 'interrupted' states
-    if (audioCtx.state !== 'running') audioCtx.resume();
+    try {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state !== 'running') audioCtx.resume();
+    } catch (e) { /* audio unavailable */ }
   }
 
-  // iOS requires AudioContext creation+resume during a direct user gesture.
-  // Unlock on every gesture type (touch, pointer, click) to cover all iOS versions.
-  // We keep listeners active because iOS can re-suspend the context.
   function unlockAudio() {
-    ensureAudio();
-    if (!audioUnlocked) {
-      // Play a silent buffer to fully unlock on iOS
+    try {
+      ensureAudio();
+      if (!audioCtx) return;
+      // Play a silent buffer on every gesture to keep iOS unlocked
       const buf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
       const src = audioCtx.createBufferSource();
       src.buffer = buf;
       src.connect(audioCtx.destination);
       src.start(0);
-      audioUnlocked = true;
-    }
+    } catch (e) { /* audio unavailable */ }
   }
   document.addEventListener('touchstart', unlockAudio, true);
+  document.addEventListener('touchend', unlockAudio, true);
   document.addEventListener('pointerdown', unlockAudio, true);
+  document.addEventListener('pointerup', unlockAudio, true);
   document.addEventListener('click', unlockAudio, true);
 
   // iOS 17+: AudioContext can get stuck in 'interrupted' after backgrounding
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && audioCtx && audioCtx.state !== 'running') {
-      audioCtx.resume();
+      try { audioCtx.resume(); } catch (e) {}
     }
   });
 
@@ -458,7 +467,8 @@ h1 {
   ];
 
   function playSuccess() {
-    ensureAudio();
+    try { ensureAudio(); } catch (e) { return; }
+    if (!audioCtx || audioCtx.state !== 'running') return;
     const t = audioCtx.currentTime;
     const chord = successChords[Math.floor(Math.random() * successChords.length)];
 
@@ -492,7 +502,8 @@ h1 {
   }
 
   function playFail() {
-    ensureAudio();
+    try { ensureAudio(); } catch (e) { return; }
+    if (!audioCtx || audioCtx.state !== 'running') return;
     const t = audioCtx.currentTime;
 
     const osc1 = audioCtx.createOscillator();
@@ -565,7 +576,8 @@ h1 {
   }
 
   function playLayerFanfare() {
-    ensureAudio();
+    try { ensureAudio(); } catch (e) { return; }
+    if (!audioCtx || audioCtx.state !== 'running') return;
     const t = audioCtx.currentTime;
     // Rising arpeggio with shimmer
     const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51];
@@ -990,7 +1002,8 @@ h1 {
         };
 
         div.addEventListener('click', () => onTileClick(tile));
-        div.addEventListener('pointerdown', () => { holdTile = tile.id; holdStart = Date.now(); });
+        div.addEventListener('pointerdown', () => { holdStart = Date.now(); holdDuration = 0; });
+        div.addEventListener('pointerup', () => { holdDuration = Date.now() - holdStart; });
 
         boardEl.appendChild(div);
         tiles.push(tile);
@@ -1050,8 +1063,8 @@ h1 {
         // Check if any layer was just fully cleared
         checkLayerCleared(first, second);
 
-        const wasHeld = holdTile === second.id && (Date.now() - holdStart) >= 300;
-        holdTile = null;
+        const wasHeld = holdDuration >= 500;
+        holdDuration = 0;
 
         if (wasHeld) {
           previewImg.src = first.el.querySelector('img').src;
@@ -1071,7 +1084,6 @@ h1 {
         first.el.classList.remove('selected');
         second.el.classList.remove('selected');
         selected = null;
-        holdTile = null;
         isProcessing = false;
       }, 600);
     }
