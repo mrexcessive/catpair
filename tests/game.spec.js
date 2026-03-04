@@ -13,14 +13,14 @@ test.describe('CatPair Mahjong Game', () => {
     await page.waitForTimeout(300);
   });
 
-  test('default 10x10 stacked: renders tiles across multiple layers', async ({ page }) => {
+  test('default 6x6 stacked: renders tiles across multiple layers', async ({ page }) => {
     const tileCount = await page.locator('.tile').count();
-    // 10x10 stacked = 426 tiles
-    expect(tileCount).toBe(426);
+    // 6x6 stacked = 36+25+36+25+16 = 138 tiles
+    expect(tileCount).toBe(138);
 
     // Score bar shows correct total pairs
     const totalPairs = await page.locator('#total-pairs').textContent();
-    expect(totalPairs).toBe('213');
+    expect(totalPairs).toBe('69');
   });
 
   test('settings buttons are present and functional', async ({ page }) => {
@@ -33,8 +33,8 @@ test.describe('CatPair Mahjong Game', () => {
     await expect(page.locator('button[data-value="flat"]')).toBeVisible();
     await expect(page.locator('button[data-value="stacked"]')).toBeVisible();
 
-    // 10x10 and stacked should be active by default
-    await expect(page.locator('button[data-value="10"]')).toHaveClass(/active/);
+    // 6x6 and stacked should be active by default
+    await expect(page.locator('button[data-value="6"]')).toHaveClass(/active/);
     await expect(page.locator('button[data-value="stacked"]')).toHaveClass(/active/);
   });
 

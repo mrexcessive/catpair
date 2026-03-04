@@ -161,6 +161,7 @@ h1 {
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.4s ease;
   border-radius: calc(var(--tile-size) * 0.0625);
+  border: calc(var(--tile-size) * 0.035) solid var(--tile-tint, rgba(212,164,74,0.5));
   user-select: none;
   -webkit-user-select: none;
 }
@@ -226,6 +227,25 @@ h1 {
 }
 #play-again:hover { transform: scale(1.06); }
 
+/* Tile preview overlay */
+#tile-preview {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(44,30,18,0.85);
+  z-index: 150;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+#tile-preview.show { display: flex; }
+#tile-preview img {
+  width: min(50vw, 50vh);
+  height: min(50vw, 50vh);
+  border-radius: 8px;
+  object-fit: cover;
+}
+
 /* Particle canvas */
 #particles {
   position: fixed;
@@ -246,9 +266,9 @@ h1 {
   <div id="settings-bar">
     <div class="btn-group">
       <span class="btn-group-label">Grid:</span>
-      <button data-setting="baseSize" data-value="6">6&#xd7;6</button>
+      <button data-setting="baseSize" data-value="6" class="active">6&#xd7;6</button>
       <button data-setting="baseSize" data-value="8">8&#xd7;8</button>
-      <button data-setting="baseSize" data-value="10" class="active">10&#xd7;10</button>
+      <button data-setting="baseSize" data-value="10">10&#xd7;10</button>
     </div>
     <div class="btn-group">
       <span class="btn-group-label">Depth:</span>
@@ -268,6 +288,10 @@ h1 {
 
 <canvas id="particles"></canvas>
 
+<div id="tile-preview">
+  <img id="preview-img" src="" alt="matched cat">
+</div>
+
 <div id="win-overlay">
   <h2>You Win!</h2>
   <p>All cats matched in <span id="final-moves">0</span> moves</p>
@@ -282,7 +306,7 @@ h1 {
   const HEADER_PX = 80; // reserved for h1 + score bar + settings bar
   const DEPTH_SHIFT_FACTOR = 0.03; // multiplied by tileSize for 3D offset
 
-  let gameConfig = { baseSize: 10, mode: 'stacked' };
+  let gameConfig = { baseSize: 6, mode: 'stacked' };
 
   // ── State ──
   let tiles = [];          // all tile objects: { id, hx, hy, z, tileName, matched, el }
@@ -293,6 +317,8 @@ h1 {
   let moves = 0;
   let audioCtx = null;
   let currentTileSize = 64;
+  let holdTile = null;
+  let holdStart = 0;
 
   // ── DOM refs ──
   const boardEl = document.getElementById('board');
@@ -303,6 +329,8 @@ h1 {
   const finalMovesEl = document.getElementById('final-moves');
   const playAgainBtn = document.getElementById('play-again');
   const newGameBtn = document.getElementById('new-game-btn');
+  const tilePreview = document.getElementById('tile-preview');
+  const previewImg = document.getElementById('preview-img');
 
   // ── Settings bar ──
   document.querySelectorAll('#settings-bar .btn-group button').forEach(btn => {
@@ -390,6 +418,22 @@ h1 {
     }
     if (audioCtx.state === 'suspended') audioCtx.resume();
   }
+
+  // iOS requires AudioContext creation+resume during a direct user gesture.
+  // Unlock on first touch/click so later setTimeout-driven playback works.
+  function unlockAudio() {
+    ensureAudio();
+    // Play a silent buffer to fully unlock on iOS
+    const buf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+    src.start(0);
+    document.removeEventListener('touchstart', unlockAudio, true);
+    document.removeEventListener('click', unlockAudio, true);
+  }
+  document.addEventListener('touchstart', unlockAudio, true);
+  document.addEventListener('click', unlockAudio, true);
 
   const successChords = [
     [523.25, 659.25, 783.99],
@@ -483,6 +527,16 @@ h1 {
   }
 
   // ── Particles ──
+  const tileTints = [
+    'rgba(230,190,60,0.55)',   // yellow
+    'rgba(220,140,40,0.55)',   // orange
+    'rgba(70,130,220,0.55)',   // blue
+    'rgba(80,180,80,0.55)',    // green
+    'rgba(60,190,200,0.55)',   // cyan
+    'rgba(210,70,70,0.55)',    // red
+    'rgba(160,90,200,0.55)',   // purple
+  ];
+
   const starColors = ['#FFD700', '#FFA500', '#FF8C00', '#FFE066', '#FFC04D'];
 
   function spawnBurst(x, y) {
@@ -824,6 +878,7 @@ h1 {
 
         const div = document.createElement('div');
         div.className = 'tile';
+        div.style.setProperty('--tile-tint', tileTints[Math.floor(Math.random() * tileTints.length)]);
 
         // Position
         div.style.left = (pos.hx * halfTile + pos.z * depthShift) + 'px';
@@ -853,6 +908,9 @@ h1 {
         };
 
         div.addEventListener('click', () => onTileClick(tile));
+        div.addEventListener('pointerdown', () => { holdTile = tile.id; holdStart = Date.now(); });
+        div.addEventListener('pointerup', () => { holdTile = null; });
+        div.addEventListener('pointercancel', () => { holdTile = null; });
 
         boardEl.appendChild(div);
         tiles.push(tile);
@@ -906,13 +964,19 @@ h1 {
         matchCount++;
         matchCountEl.textContent = matchCount;
 
-        if (matchCount >= totalPairs) {
-          setTimeout(() => showWin(), 500);
-        }
-
         selected = null;
-        isProcessing = false;
         updateExposure();
+
+        if (holdTile === second.id && (Date.now() - holdStart) >= 300) {
+          previewImg.src = first.el.querySelector('img').src;
+          tilePreview.classList.add('show');
+          // isProcessing stays true until preview dismissed
+        } else {
+          isProcessing = false;
+          if (matchCount >= totalPairs) {
+            setTimeout(() => showWin(), 500);
+          }
+        }
       }, 400);
     } else {
       playFail();
@@ -925,6 +989,15 @@ h1 {
       }, 600);
     }
   }
+
+  // ── Preview dismiss ──
+  tilePreview.addEventListener('click', () => {
+    tilePreview.classList.remove('show');
+    isProcessing = false;
+    if (matchCount >= totalPairs) {
+      setTimeout(() => showWin(), 500);
+    }
+  });
 
   // ── Win screen ──
   function showWin() {
