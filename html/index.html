@@ -437,18 +437,18 @@ h1 {
     try {
       ensureAudio();
       if (!audioCtx) return;
-      // Play a silent buffer on every gesture to keep iOS unlocked
-      const buf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
-      const src = audioCtx.createBufferSource();
-      src.buffer = buf;
-      src.connect(audioCtx.destination);
-      src.start(0);
+      // Only play silent buffer when context needs unlocking (not every gesture)
+      if (audioCtx.state !== 'running') {
+        const buf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+        const src = audioCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(audioCtx.destination);
+        src.start(0);
+      }
     } catch (e) { /* audio unavailable */ }
   }
   document.addEventListener('touchstart', unlockAudio, true);
   document.addEventListener('touchend', unlockAudio, true);
-  document.addEventListener('pointerdown', unlockAudio, true);
-  document.addEventListener('pointerup', unlockAudio, true);
   document.addEventListener('click', unlockAudio, true);
 
   // iOS 17+: AudioContext can get stuck in 'interrupted' after backgrounding
@@ -815,10 +815,19 @@ h1 {
 
       if (exposed.length < 2) return null; // retry
 
-      // Pick 2 random exposed positions
+      // Pick 2 random exposed positions that don't overlap vertically
+      // (a pair stacked on itself is unplayable)
       shuffle(exposed);
       const idx1 = exposed[0];
-      const idx2 = exposed[1];
+      const p1 = positions[idx1];
+      let idx2 = -1;
+      for (let k = 1; k < exposed.length; k++) {
+        const p2 = positions[exposed[k]];
+        if (p1.z !== p2.z && tilesOverlap(p1.hx, p1.hy, p2.hx, p2.hy)) continue;
+        idx2 = exposed[k];
+        break;
+      }
+      if (idx2 === -1) return null; // retry
       filled[idx1] = true;
       filled[idx2] = true;
       placementOrder.push([idx1, idx2]);
