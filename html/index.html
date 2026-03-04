@@ -815,10 +815,19 @@ h1 {
 
       if (exposed.length < 2) return null; // retry
 
-      // Pick 2 random exposed positions
+      // Pick 2 random exposed positions that don't overlap vertically
+      // (a pair stacked on itself is unplayable)
       shuffle(exposed);
       const idx1 = exposed[0];
-      const idx2 = exposed[1];
+      const p1 = positions[idx1];
+      let idx2 = -1;
+      for (let k = 1; k < exposed.length; k++) {
+        const p2 = positions[exposed[k]];
+        if (p1.z !== p2.z && tilesOverlap(p1.hx, p1.hy, p2.hx, p2.hy)) continue;
+        idx2 = exposed[k];
+        break;
+      }
+      if (idx2 === -1) return null; // retry
       filled[idx1] = true;
       filled[idx2] = true;
       placementOrder.push([idx1, idx2]);
