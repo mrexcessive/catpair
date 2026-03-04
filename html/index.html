@@ -226,6 +226,25 @@ h1 {
 }
 #play-again:hover { transform: scale(1.06); }
 
+/* Tile preview overlay */
+#tile-preview {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(44,30,18,0.85);
+  z-index: 150;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+#tile-preview.show { display: flex; }
+#tile-preview img {
+  width: min(50vw, 50vh);
+  height: min(50vw, 50vh);
+  border-radius: 8px;
+  object-fit: cover;
+}
+
 /* Particle canvas */
 #particles {
   position: fixed;
@@ -268,6 +287,10 @@ h1 {
 
 <canvas id="particles"></canvas>
 
+<div id="tile-preview">
+  <img id="preview-img" src="" alt="matched cat">
+</div>
+
 <div id="win-overlay">
   <h2>You Win!</h2>
   <p>All cats matched in <span id="final-moves">0</span> moves</p>
@@ -293,6 +316,8 @@ h1 {
   let moves = 0;
   let audioCtx = null;
   let currentTileSize = 64;
+  let holdTile = null;
+  let holdStart = 0;
 
   // ── DOM refs ──
   const boardEl = document.getElementById('board');
@@ -303,6 +328,8 @@ h1 {
   const finalMovesEl = document.getElementById('final-moves');
   const playAgainBtn = document.getElementById('play-again');
   const newGameBtn = document.getElementById('new-game-btn');
+  const tilePreview = document.getElementById('tile-preview');
+  const previewImg = document.getElementById('preview-img');
 
   // ── Settings bar ──
   document.querySelectorAll('#settings-bar .btn-group button').forEach(btn => {
@@ -869,6 +896,9 @@ h1 {
         };
 
         div.addEventListener('click', () => onTileClick(tile));
+        div.addEventListener('pointerdown', () => { holdTile = tile.id; holdStart = Date.now(); });
+        div.addEventListener('pointerup', () => { holdTile = null; });
+        div.addEventListener('pointercancel', () => { holdTile = null; });
 
         boardEl.appendChild(div);
         tiles.push(tile);
@@ -922,13 +952,19 @@ h1 {
         matchCount++;
         matchCountEl.textContent = matchCount;
 
-        if (matchCount >= totalPairs) {
-          setTimeout(() => showWin(), 500);
-        }
-
         selected = null;
-        isProcessing = false;
         updateExposure();
+
+        if (holdTile === second.id && (Date.now() - holdStart) >= 300) {
+          previewImg.src = first.el.querySelector('img').src;
+          tilePreview.classList.add('show');
+          // isProcessing stays true until preview dismissed
+        } else {
+          isProcessing = false;
+          if (matchCount >= totalPairs) {
+            setTimeout(() => showWin(), 500);
+          }
+        }
       }, 400);
     } else {
       playFail();
@@ -941,6 +977,15 @@ h1 {
       }, 600);
     }
   }
+
+  // ── Preview dismiss ──
+  tilePreview.addEventListener('click', () => {
+    tilePreview.classList.remove('show');
+    isProcessing = false;
+    if (matchCount >= totalPairs) {
+      setTimeout(() => showWin(), 500);
+    }
+  });
 
   // ── Win screen ──
   function showWin() {
