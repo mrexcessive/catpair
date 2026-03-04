@@ -451,10 +451,15 @@ h1 {
   document.addEventListener('touchend', unlockAudio, true);
   document.addEventListener('click', unlockAudio, true);
 
-  // iOS 17+: AudioContext can get stuck in 'interrupted' after backgrounding
+  // iOS: AudioContext can get stuck in 'interrupted' after backgrounding.
+  // resume() alone often fails — recreate the context on return.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && audioCtx && audioCtx.state !== 'running') {
-      try { audioCtx.resume(); } catch (e) {}
+    if (document.visibilityState === 'visible' && audioCtx) {
+      if (audioCtx.state !== 'running') {
+        try { audioCtx.close(); } catch (e) {}
+        audioCtx = null;
+        ensureAudio();
+      }
     }
   });
 
