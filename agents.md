@@ -15,3 +15,7 @@
 - python scripts are kept specialised and fairly small
 - HTML+Javascript is used to deliver content to gh-pages in one page; compatible with all recent browsers
 
+## Behaviour
+- commit after every code change
+- tag with version number before merge to main
+
