@@ -412,6 +412,8 @@ h1 {
   resizeCanvas();
 
   // ── Audio ──
+  let audioUnlocked = false;
+
   function ensureAudio() {
     if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -420,19 +422,22 @@ h1 {
   }
 
   // iOS requires AudioContext creation+resume during a direct user gesture.
-  // Unlock on first touch/click so later setTimeout-driven playback works.
+  // Unlock on every gesture type (touch, pointer, click) to cover all iOS versions.
+  // We keep listeners active because iOS can re-suspend the context.
   function unlockAudio() {
     ensureAudio();
-    // Play a silent buffer to fully unlock on iOS
-    const buf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
-    const src = audioCtx.createBufferSource();
-    src.buffer = buf;
-    src.connect(audioCtx.destination);
-    src.start(0);
-    document.removeEventListener('touchstart', unlockAudio, true);
-    document.removeEventListener('click', unlockAudio, true);
+    if (!audioUnlocked) {
+      // Play a silent buffer to fully unlock on iOS
+      const buf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(audioCtx.destination);
+      src.start(0);
+      audioUnlocked = true;
+    }
   }
   document.addEventListener('touchstart', unlockAudio, true);
+  document.addEventListener('pointerdown', unlockAudio, true);
   document.addEventListener('click', unlockAudio, true);
 
   const successChords = [
