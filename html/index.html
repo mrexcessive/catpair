@@ -437,18 +437,18 @@ h1 {
     try {
       ensureAudio();
       if (!audioCtx) return;
-      // Play a silent buffer on every gesture to keep iOS unlocked
-      const buf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
-      const src = audioCtx.createBufferSource();
-      src.buffer = buf;
-      src.connect(audioCtx.destination);
-      src.start(0);
+      // Only play silent buffer when context needs unlocking (not every gesture)
+      if (audioCtx.state !== 'running') {
+        const buf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+        const src = audioCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(audioCtx.destination);
+        src.start(0);
+      }
     } catch (e) { /* audio unavailable */ }
   }
   document.addEventListener('touchstart', unlockAudio, true);
   document.addEventListener('touchend', unlockAudio, true);
-  document.addEventListener('pointerdown', unlockAudio, true);
-  document.addEventListener('pointerup', unlockAudio, true);
   document.addEventListener('click', unlockAudio, true);
 
   // iOS 17+: AudioContext can get stuck in 'interrupted' after backgrounding
