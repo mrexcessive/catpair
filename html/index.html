@@ -161,7 +161,7 @@ h1 {
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.4s ease;
   border-radius: calc(var(--tile-size) * 0.0625);
-  border: calc(var(--tile-size) * 0.035) solid var(--tile-tint, rgba(212,164,74,0.5));
+  border: calc(var(--tile-size) * 0.035) solid var(--tile-tint, #d4a44a);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -319,6 +319,7 @@ h1 {
   let currentTileSize = 64;
   let holdTile = null;
   let holdStart = 0;
+  let clearedLayers = new Set();
 
   // ── DOM refs ──
   const boardEl = document.getElementById('board');
@@ -412,28 +413,41 @@ h1 {
   resizeCanvas();
 
   // ── Audio ──
+  let audioUnlocked = false;
+
   function ensureAudio() {
     if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
-    if (audioCtx.state === 'suspended') audioCtx.resume();
+    // iOS 17+ can get stuck in 'suspended' or 'interrupted' states
+    if (audioCtx.state !== 'running') audioCtx.resume();
   }
 
   // iOS requires AudioContext creation+resume during a direct user gesture.
-  // Unlock on first touch/click so later setTimeout-driven playback works.
+  // Unlock on every gesture type (touch, pointer, click) to cover all iOS versions.
+  // We keep listeners active because iOS can re-suspend the context.
   function unlockAudio() {
     ensureAudio();
-    // Play a silent buffer to fully unlock on iOS
-    const buf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
-    const src = audioCtx.createBufferSource();
-    src.buffer = buf;
-    src.connect(audioCtx.destination);
-    src.start(0);
-    document.removeEventListener('touchstart', unlockAudio, true);
-    document.removeEventListener('click', unlockAudio, true);
+    if (!audioUnlocked) {
+      // Play a silent buffer to fully unlock on iOS
+      const buf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(audioCtx.destination);
+      src.start(0);
+      audioUnlocked = true;
+    }
   }
   document.addEventListener('touchstart', unlockAudio, true);
+  document.addEventListener('pointerdown', unlockAudio, true);
   document.addEventListener('click', unlockAudio, true);
+
+  // iOS 17+: AudioContext can get stuck in 'interrupted' after backgrounding
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && audioCtx && audioCtx.state !== 'running') {
+      audioCtx.resume();
+    }
+  });
 
   const successChords = [
     [523.25, 659.25, 783.99],
@@ -528,19 +542,68 @@ h1 {
 
   // ── Particles ──
   const tileTints = [
-    'rgba(230,190,60,0.55)',   // yellow
-    'rgba(220,140,40,0.55)',   // orange
-    'rgba(70,130,220,0.55)',   // blue
-    'rgba(80,180,80,0.55)',    // green
-    'rgba(60,190,200,0.55)',   // cyan
-    'rgba(210,70,70,0.55)',    // red
-    'rgba(160,90,200,0.55)',   // purple
+    '#e6be3c',   // gold
+    '#dc8c28',   // orange
+    '#4682dc',   // blue
+    '#50b450',   // green
+    '#3cbec8',   // cyan
+    '#d24646',   // red
+    '#a05ac8',   // purple
   ];
 
   const starColors = ['#FFD700', '#FFA500', '#FF8C00', '#FFE066', '#FFC04D'];
 
-  function spawnBurst(x, y) {
-    for (let i = 0; i < 15; i++) {
+  function spawnCelebration() {
+    // Spawn many bursts across the screen
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    for (let i = 0; i < 8; i++) {
+      const x = w * 0.15 + Math.random() * w * 0.7;
+      const y = h * 0.2 + Math.random() * h * 0.5;
+      setTimeout(() => spawnBurst(x, y, 25), i * 80);
+    }
+  }
+
+  function playLayerFanfare() {
+    ensureAudio();
+    const t = audioCtx.currentTime;
+    // Rising arpeggio with shimmer
+    const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51];
+    notes.forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+      const onset = t + i * 0.1;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.2, onset + 0.03);
+      gain.gain.setValueAtTime(0.2, onset + 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.001, onset + 0.8);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(onset);
+      osc.stop(onset + 0.85);
+    });
+    // Final shimmer chord
+    [1046.50, 1318.51, 1567.98].forEach(freq => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, t);
+      const onset = t + 0.5;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.1, onset + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, onset + 1.2);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(onset);
+      osc.stop(onset + 1.25);
+    });
+  }
+
+  function spawnBurst(x, y, count) {
+    count = count || 15;
+    for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 80 + Math.random() * 160;
       particles.push({
@@ -791,6 +854,24 @@ h1 {
     return { tileAssignment, placementOrder: null };
   }
 
+  // ── Layer clear celebration ──
+  function checkLayerCleared(t1, t2) {
+    // Check both tiles' layers (they might be on different layers)
+    const layersToCheck = new Set([t1.z, t2.z]);
+    for (const z of layersToCheck) {
+      if (clearedLayers.has(z)) continue;
+      const layerTiles = tiles.filter(t => t.z === z);
+      if (layerTiles.length > 0 && layerTiles.every(t => t.matched)) {
+        clearedLayers.add(z);
+        // Don't celebrate clearing the only layer in flat mode
+        if (gameConfig.mode === 'stacked') {
+          playLayerFanfare();
+          spawnCelebration();
+        }
+      }
+    }
+  }
+
   // ── Exposure Check ──
   function isExposed(tile) {
     if (tile.matched) return false;
@@ -866,6 +947,7 @@ h1 {
       isProcessing = false;
       matchCount = 0;
       moves = 0;
+      clearedLayers = new Set();
       matchCountEl.textContent = '0';
 
       const tileSize = recalcTileSize();
@@ -909,8 +991,6 @@ h1 {
 
         div.addEventListener('click', () => onTileClick(tile));
         div.addEventListener('pointerdown', () => { holdTile = tile.id; holdStart = Date.now(); });
-        div.addEventListener('pointerup', () => { holdTile = null; });
-        div.addEventListener('pointercancel', () => { holdTile = null; });
 
         boardEl.appendChild(div);
         tiles.push(tile);
@@ -967,7 +1047,13 @@ h1 {
         selected = null;
         updateExposure();
 
-        if (holdTile === second.id && (Date.now() - holdStart) >= 300) {
+        // Check if any layer was just fully cleared
+        checkLayerCleared(first, second);
+
+        const wasHeld = holdTile === second.id && (Date.now() - holdStart) >= 300;
+        holdTile = null;
+
+        if (wasHeld) {
           previewImg.src = first.el.querySelector('img').src;
           tilePreview.classList.add('show');
           // isProcessing stays true until preview dismissed
@@ -985,6 +1071,7 @@ h1 {
         first.el.classList.remove('selected');
         second.el.classList.remove('selected');
         selected = null;
+        holdTile = null;
         isProcessing = false;
       }, 600);
     }
