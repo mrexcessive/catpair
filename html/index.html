@@ -909,8 +909,6 @@ h1 {
 
         div.addEventListener('click', () => onTileClick(tile));
         div.addEventListener('pointerdown', () => { holdTile = tile.id; holdStart = Date.now(); });
-        div.addEventListener('pointerup', () => { holdTile = null; });
-        div.addEventListener('pointercancel', () => { holdTile = null; });
 
         boardEl.appendChild(div);
         tiles.push(tile);
@@ -967,7 +965,10 @@ h1 {
         selected = null;
         updateExposure();
 
-        if (holdTile === second.id && (Date.now() - holdStart) >= 300) {
+        const wasHeld = holdTile === second.id && (Date.now() - holdStart) >= 300;
+        holdTile = null;
+
+        if (wasHeld) {
           previewImg.src = first.el.querySelector('img').src;
           tilePreview.classList.add('show');
           // isProcessing stays true until preview dismissed
@@ -985,6 +986,7 @@ h1 {
         first.el.classList.remove('selected');
         second.el.classList.remove('selected');
         selected = null;
+        holdTile = null;
         isProcessing = false;
       }, 600);
     }
