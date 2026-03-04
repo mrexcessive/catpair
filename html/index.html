@@ -2,36 +2,64 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>CatPair — Mahjong Matching Game</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+}
 
 body {
   background: #2c1e12;
   color: #f5e6d3;
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  min-height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  overflow-x: hidden;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Background image layer */
+#bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-image: url('assets/backgrounds/level1.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: brightness(0.35) blur(3px);
+}
+
+/* All visible content above background */
+#game-wrap {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
 h1 {
-  font-size: 1.6rem;
-  margin: 12px 0 4px;
-  text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  font-size: clamp(0.9rem, 2.5vh, 1.6rem);
+  margin: 0 0 2px;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.7);
   letter-spacing: 0.04em;
 }
 
 #score-bar {
-  font-size: 0.95rem;
-  margin-bottom: 10px;
+  font-size: clamp(0.7rem, 1.8vh, 0.95rem);
+  margin-bottom: 4px;
   opacity: 0.85;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
 }
 
 /* Loading indicator */
@@ -51,20 +79,19 @@ h1 {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Board */
+/* Board — tile size driven by CSS custom property set from JS */
 #board {
   display: grid;
-  grid-template-columns: repeat(10, 128px);
-  gap: 4px;
-  padding: 8px;
+  grid-template-columns: repeat(10, var(--tile-size));
+  gap: var(--tile-gap);
 }
 
 .tile {
-  width: 128px;
-  height: 128px;
+  width: var(--tile-size);
+  height: var(--tile-size);
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.4s ease;
-  border-radius: 8px;
+  border-radius: calc(var(--tile-size) * 0.0625);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -73,13 +100,13 @@ h1 {
   height: 100%;
   display: block;
   pointer-events: none;
-  border-radius: 8px;
+  border-radius: calc(var(--tile-size) * 0.0625);
 }
 .tile:hover { transform: scale(1.04); }
 .tile.selected {
   transform: scale(1.08);
-  box-shadow: 0 0 14px 4px rgba(255, 200, 50, 0.8),
-              0 0 30px 8px rgba(255, 160, 20, 0.4);
+  box-shadow: 0 0 calc(var(--tile-size) * 0.11) calc(var(--tile-size) * 0.03) rgba(255, 200, 50, 0.8),
+              0 0 calc(var(--tile-size) * 0.23) calc(var(--tile-size) * 0.06) rgba(255, 160, 20, 0.4);
   z-index: 10;
 }
 .tile.matched {
@@ -130,31 +157,23 @@ h1 {
   pointer-events: none;
   z-index: 100;
 }
-
-/* Mobile */
-@media (max-width: 768px) {
-  h1 { font-size: 1.2rem; margin: 8px 0 2px; }
-  #score-bar { font-size: 0.8rem; margin-bottom: 6px; }
-  #board {
-    grid-template-columns: repeat(10, 64px);
-    gap: 2px;
-    padding: 4px;
-  }
-  .tile { width: 64px; height: 64px; }
-}
 </style>
 </head>
 <body>
 
-<h1>CatPair</h1>
-<div id="score-bar">Matches: <span id="match-count">0</span> / 50</div>
+<div id="bg"></div>
 
-<div id="loading">
-  <div class="spinner"></div>
-  <div>Loading cat tiles&hellip;</div>
+<div id="game-wrap">
+  <h1>CatPair</h1>
+  <div id="score-bar">Matches: <span id="match-count">0</span> / 50</div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <div>Loading cat tiles&hellip;</div>
+  </div>
+
+  <div id="board"></div>
 </div>
-
-<div id="board"></div>
 
 <canvas id="particles"></canvas>
 
@@ -168,15 +187,21 @@ h1 {
 (function() {
   'use strict';
 
+  // ── Constants ──
+  const COLS = 10;
+  const ROWS = 10;
+  const HEADER_PX = 48; // reserved for h1 + score bar
+  const MIN_GAP = 2;
+  const MAX_GAP = 4;
+
   // ── State ──
-  let tileNames = [];       // 25 unique tile filenames used this game
-  let grid = [];             // 100 entries: { name, el, matched }
-  let selected = null;       // index of first selected tile, or null
+  let tileNames = [];
+  let grid = [];
+  let selected = null;
   let isProcessing = false;
   let matchCount = 0;
   let moves = 0;
   let audioCtx = null;
-  const isMobile = window.innerWidth <= 768;
 
   // ── DOM refs ──
   const boardEl = document.getElementById('board');
@@ -185,6 +210,29 @@ h1 {
   const winOverlay = document.getElementById('win-overlay');
   const finalMovesEl = document.getElementById('final-moves');
   const playAgainBtn = document.getElementById('play-again');
+
+  // ── Dynamic tile sizing ──
+  function recalcTileSize() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const availW = vw - 8;  // small outer margin
+    const availH = vh - HEADER_PX - 8;
+
+    // Estimate gap, then compute tile size to fit both axes
+    const gap = Math.max(MIN_GAP, Math.min(MAX_GAP, Math.floor(Math.min(vw, vh) * 0.004)));
+    const totalGapW = gap * (COLS - 1);
+    const totalGapH = gap * (ROWS - 1);
+
+    const tileFromW = Math.floor((availW - totalGapW) / COLS);
+    const tileFromH = Math.floor((availH - totalGapH) / ROWS);
+    const tileSize = Math.max(24, Math.min(tileFromW, tileFromH, 128));
+
+    document.documentElement.style.setProperty('--tile-size', tileSize + 'px');
+    document.documentElement.style.setProperty('--tile-gap', gap + 'px');
+    return tileSize;
+  }
+  recalcTileSize();
+  window.addEventListener('resize', recalcTileSize);
 
   // ── Particle canvas ──
   const canvas = document.getElementById('particles');
@@ -207,115 +255,105 @@ h1 {
     if (audioCtx.state === 'suspended') audioCtx.resume();
   }
 
-  // 10 meow parameter variations
-  const meowParams = [
-    { f0: 520, f1: 780, dur: 0.35, vib: 8 },
-    { f0: 480, f1: 850, dur: 0.40, vib: 6 },
-    { f0: 600, f1: 900, dur: 0.30, vib: 10 },
-    { f0: 440, f1: 720, dur: 0.38, vib: 7 },
-    { f0: 560, f1: 800, dur: 0.32, vib: 9 },
-    { f0: 500, f1: 860, dur: 0.42, vib: 5 },
-    { f0: 620, f1: 880, dur: 0.28, vib: 11 },
-    { f0: 460, f1: 750, dur: 0.36, vib: 8 },
-    { f0: 540, f1: 820, dur: 0.34, vib: 7 },
-    { f0: 580, f1: 870, dur: 0.38, vib: 6 },
+  // --- 5 success sounds: bright chime arpeggios using pentatonic notes ---
+  const successChords = [
+    [523.25, 659.25, 783.99],          // C5, E5, G5
+    [587.33, 739.99, 880.00],          // D5, F#5, A5
+    [659.25, 830.61, 987.77],          // E5, G#5, B5
+    [698.46, 880.00, 1046.50],         // F5, A5, C6
+    [783.99, 987.77, 1174.66],         // G5, B5, D6
   ];
 
-  function playMeow() {
+  function playSuccess() {
     ensureAudio();
-    const p = meowParams[Math.floor(Math.random() * meowParams.length)];
     const t = audioCtx.currentTime;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    const vibOsc = audioCtx.createOscillator();
-    const vibGain = audioCtx.createGain();
+    const chord = successChords[Math.floor(Math.random() * successChords.length)];
 
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(p.f0, t);
-    osc.frequency.linearRampToValueAtTime(p.f1, t + p.dur * 0.3);
-    osc.frequency.linearRampToValueAtTime(p.f0 * 0.9, t + p.dur);
+    chord.forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
 
-    vibOsc.type = 'sine';
-    vibOsc.frequency.value = p.vib;
-    vibGain.gain.value = 15;
-    vibOsc.connect(vibGain);
-    vibGain.connect(osc.frequency);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t);
 
-    gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(0.25, t + 0.03);
-    gain.gain.setValueAtTime(0.25, t + p.dur * 0.5);
-    gain.gain.linearRampToValueAtTime(0, t + p.dur);
+      // Stagger each note slightly for an arpeggio feel
+      const onset = t + i * 0.07;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.18, onset + 0.02);
+      gain.gain.setValueAtTime(0.18, onset + 0.15);
+      gain.gain.exponentialRampToValueAtTime(0.001, onset + 0.6);
 
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(onset);
+      osc.stop(onset + 0.65);
+    });
 
-    osc.start(t);
-    vibOsc.start(t);
-    osc.stop(t + p.dur + 0.05);
-    vibOsc.stop(t + p.dur + 0.05);
+    // Add a soft shimmer overtone
+    const shimmer = audioCtx.createOscillator();
+    const sGain = audioCtx.createGain();
+    shimmer.type = 'triangle';
+    shimmer.frequency.setValueAtTime(chord[2] * 2, t);
+    sGain.gain.setValueAtTime(0, t);
+    sGain.gain.linearRampToValueAtTime(0.06, t + 0.15);
+    sGain.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
+    shimmer.connect(sGain);
+    sGain.connect(audioCtx.destination);
+    shimmer.start(t + 0.1);
+    shimmer.stop(t + 0.85);
   }
 
-  function playWahWah() {
+  // --- Fail sound: low buzzer with descending tone ---
+  function playFail() {
     ensureAudio();
     const t = audioCtx.currentTime;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
 
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(440, t);
-    osc.frequency.setValueAtTime(440, t + 0.15);
-    osc.frequency.linearRampToValueAtTime(360, t + 0.3);
-    osc.frequency.linearRampToValueAtTime(280, t + 0.5);
+    // Main buzz
+    const osc1 = audioCtx.createOscillator();
+    const gain1 = audioCtx.createGain();
+    osc1.type = 'square';
+    osc1.frequency.setValueAtTime(185, t);
+    osc1.frequency.linearRampToValueAtTime(140, t + 0.35);
+    gain1.gain.setValueAtTime(0.12, t);
+    gain1.gain.linearRampToValueAtTime(0.12, t + 0.2);
+    gain1.gain.linearRampToValueAtTime(0, t + 0.4);
+    osc1.connect(gain1);
+    gain1.connect(audioCtx.destination);
+    osc1.start(t);
+    osc1.stop(t + 0.45);
 
-    // Tremolo
-    const trem = audioCtx.createOscillator();
-    const tremGain = audioCtx.createGain();
-    trem.type = 'sine';
-    trem.frequency.value = 8;
-    tremGain.gain.value = 0.08;
-    trem.connect(tremGain);
-    tremGain.connect(gain.gain);
+    // Dissonant second voice
+    const osc2 = audioCtx.createOscillator();
+    const gain2 = audioCtx.createGain();
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(195, t);
+    osc2.frequency.linearRampToValueAtTime(148, t + 0.35);
+    gain2.gain.setValueAtTime(0.07, t);
+    gain2.gain.linearRampToValueAtTime(0.07, t + 0.2);
+    gain2.gain.linearRampToValueAtTime(0, t + 0.4);
+    osc2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+    osc2.start(t);
+    osc2.stop(t + 0.45);
 
-    gain.gain.setValueAtTime(0.15, t);
-    gain.gain.linearRampToValueAtTime(0, t + 0.55);
-
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start(t);
-    trem.start(t);
-    osc.stop(t + 0.6);
-    trem.stop(t + 0.6);
-  }
-
-  function playHiss() {
-    ensureAudio();
-    const t = audioCtx.currentTime;
-    const bufferSize = audioCtx.sampleRate * 0.36;
-    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-
-    const src = audioCtx.createBufferSource();
-    src.buffer = buffer;
-
+    // Noise burst
+    const bufLen = Math.floor(audioCtx.sampleRate * 0.15);
+    const buf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufLen; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = buf;
     const bp = audioCtx.createBiquadFilter();
     bp.type = 'bandpass';
-    bp.frequency.value = 4000;
-    bp.Q.value = 1.5;
-
-    const hp = audioCtx.createBiquadFilter();
-    hp.type = 'highpass';
-    hp.frequency.value = 2000;
-
-    const gain = audioCtx.createGain();
-    gain.gain.setValueAtTime(0.2, t);
-    gain.gain.linearRampToValueAtTime(0, t + 0.36);
-
-    src.connect(bp);
-    bp.connect(hp);
-    hp.connect(gain);
-    gain.connect(audioCtx.destination);
-    src.start(t);
+    bp.frequency.value = 600;
+    bp.Q.value = 2;
+    const nGain = audioCtx.createGain();
+    nGain.gain.setValueAtTime(0.08, t);
+    nGain.gain.linearRampToValueAtTime(0, t + 0.2);
+    noise.connect(bp);
+    bp.connect(nGain);
+    nGain.connect(audioCtx.destination);
+    noise.start(t);
   }
 
   // ── Particles ──
@@ -371,7 +409,7 @@ h1 {
       const p = particles[i];
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      p.vy += 300 * dt; // gravity
+      p.vy += 300 * dt;
       p.spin += p.spinRate * dt;
       p.life -= p.decay;
 
@@ -409,20 +447,18 @@ h1 {
 
   // ── Board setup ──
   function buildBoard(allTileNames) {
-    // Pick 25 unique tiles
     const shuffled = shuffle([...allTileNames]);
     const chosen = shuffled.slice(0, 25);
     tileNames = chosen;
 
-    // Each tile repeated 4 times = 100
     let deck = [];
     for (const name of chosen) {
       for (let i = 0; i < 4; i++) deck.push(name);
     }
     shuffle(deck);
 
-    // Preload images
-    const tileDir = isMobile ? 'assets/playtiles/64/' : 'assets/playtiles/';
+    // Always preload 128px tiles (we scale with CSS, need crisp source)
+    const tileDir = 'assets/playtiles/';
     const preloaded = new Map();
     let loaded = 0;
     const total = chosen.length;
@@ -473,32 +509,26 @@ h1 {
     const tile = grid[index];
     if (tile.matched) return;
 
-    // First selection
     if (selected === null) {
       selected = index;
       tile.el.classList.add('selected');
       return;
     }
 
-    // Clicked same tile
     if (selected === index) {
       tile.el.classList.remove('selected');
       selected = null;
       return;
     }
 
-    // Second selection
     const first = grid[selected];
-    const secondIndex = index;
     const second = tile;
     second.el.classList.add('selected');
     moves++;
-
     isProcessing = true;
 
     if (first.name === second.name) {
-      // Match!
-      playMeow();
+      playSuccess();
 
       const c1 = tileCenterViewport(first.el);
       const c2 = tileCenterViewport(second.el);
@@ -513,8 +543,6 @@ h1 {
         first.matched = true;
         second.matched = true;
 
-        // Find all tiles with same name and check if all 4 are matched
-        // (we match in pairs, so 2 matched at a time out of 4)
         matchCount++;
         matchCountEl.textContent = matchCount;
 
@@ -526,9 +554,7 @@ h1 {
         isProcessing = false;
       }, 400);
     } else {
-      // Mismatch
-      playWahWah();
-      setTimeout(() => playHiss(), 150);
+      playFail();
 
       setTimeout(() => {
         first.el.classList.remove('selected');
