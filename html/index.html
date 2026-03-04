@@ -418,7 +418,8 @@ h1 {
     if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
-    if (audioCtx.state === 'suspended') audioCtx.resume();
+    // iOS 17+ can get stuck in 'suspended' or 'interrupted' states
+    if (audioCtx.state !== 'running') audioCtx.resume();
   }
 
   // iOS requires AudioContext creation+resume during a direct user gesture.
@@ -439,6 +440,13 @@ h1 {
   document.addEventListener('touchstart', unlockAudio, true);
   document.addEventListener('pointerdown', unlockAudio, true);
   document.addEventListener('click', unlockAudio, true);
+
+  // iOS 17+: AudioContext can get stuck in 'interrupted' after backgrounding
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && audioCtx && audioCtx.state !== 'running') {
+      audioCtx.resume();
+    }
+  });
 
   const successChords = [
     [523.25, 659.25, 783.99],
