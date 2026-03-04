@@ -246,9 +246,9 @@ h1 {
   <div id="settings-bar">
     <div class="btn-group">
       <span class="btn-group-label">Grid:</span>
-      <button data-setting="baseSize" data-value="6">6&#xd7;6</button>
+      <button data-setting="baseSize" data-value="6" class="active">6&#xd7;6</button>
       <button data-setting="baseSize" data-value="8">8&#xd7;8</button>
-      <button data-setting="baseSize" data-value="10" class="active">10&#xd7;10</button>
+      <button data-setting="baseSize" data-value="10">10&#xd7;10</button>
     </div>
     <div class="btn-group">
       <span class="btn-group-label">Depth:</span>
@@ -282,7 +282,7 @@ h1 {
   const HEADER_PX = 80; // reserved for h1 + score bar + settings bar
   const DEPTH_SHIFT_FACTOR = 0.03; // multiplied by tileSize for 3D offset
 
-  let gameConfig = { baseSize: 10, mode: 'stacked' };
+  let gameConfig = { baseSize: 6, mode: 'stacked' };
 
   // ── State ──
   let tiles = [];          // all tile objects: { id, hx, hy, z, tileName, matched, el }
